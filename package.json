@@ -1,0 +1,16 @@
+{
+  "name": "hangboard",
+  "version": "1.0.0",
+  "description": "Use load cell with hx711 chip connected to raspberry pi to measure weight on hangboard",
+  "main": "hangboard.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "Bruce Eng",
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.17.3",
+    "pi-hx711": "^1.2.0",
+    "pigpio": "^3.3.1"
+  }
+}
