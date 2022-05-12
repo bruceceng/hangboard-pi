@@ -75,8 +75,16 @@ function hangTimeCalc(x, y) {
   return({hangTime: hangTime, hangWeight: hangWeight});
 }
 
+var globalCommand = false;
+
+function saveCommand(saveType) {
+  globalCommand = saveType;
+}
+
 async function main() {
+  let saveList = [];
   do {
+
     let response = await fetch('./api');
     let result = await response.json();
     console.log(result);
@@ -105,14 +113,32 @@ async function main() {
     let hangTime = hangTimeResult.hangTime;
     let hangWeight = hangTimeResult.hangWeight;
 
+    let historyHtml = saveList.map(x => `${x.type}:${x.weight} lbs ${x.time} s`).join('<br/>');
+
     let htmlResult = `
-      <div style="display: table; text-align: center; position: absolute; top: 20vh; left: 40vw; width: 20vw; height: ${height}vh; background-color: ${weightFraction < 0 ? 'blue' : 'green'}; color: white; font-weight: bold; font-size: 2em">
-        <div style="display: table-cell; text-align: center;  color: white; font-weight: bold; font-size: 2em">
-          ${hangWeight>0?hangWeight.toFixed(1):Math.abs(value).toFixed(3)}<br/>${hangTime.toFixed(1)}
+      <div style="position: fixed; top: 0px; left:0px; width:95%; height:80%; overflow: hidden">
+        <div style="display: table; text-align: center; position: absolute; top: 20vh; left: 40vw; width: 20vw; height: ${height}vh; background-color: ${weightFraction < 0 ? 'blue' : 'green'}; color: white; font-weight: bold; font-size: 2em">
+          <div style="display: table-cell; text-align: center;  color: white; font-weight: bold; font-size: 2em">
+            ${hangWeight>0?hangWeight.toFixed(1):Math.abs(value).toFixed(3)}<br/>${hangTime.toFixed(1)}
+          </div>
+        </div>
+        <button onclick="saveCommand('left')" style="position: fixed; top: 0px; left: 0vw; width: 22vw; height: 10vh;" value="save-left">Save Left</button>
+        <button onclick="saveCommand('both')" style="position: fixed; top: 0px; left: 25vw; width: 22vw; height: 10vh;" value="save-both">Save Both</button>
+        <button onclick="saveCommand('right')" style="position: fixed; top: 0px; left: 50vw; width: 22vw; height: 10vh;" value="save-right">Save Right</button>
+        <button onclick="window.location.href=window.location.href" style="position: fixed; top: 0px; left: 75vw; width: 22vw; height: 10vh;" value="discard">Discard</button>
+        <div style="position: fixed; top: 40vh; left: 0px; width: 50vw; height: 20vh; font-weight: bold; font-size: 2em">
+          ${historyHtml}
         </div>
       </div>
     `;
     document.getElementById("content").innerHTML = htmlResult;
+
+    //see if a button click command happened
+    if (globalCommand) {
+      saveList.push({type: globalCommand, weight: hangWeight, time: hangTime});
+      globalCommand = false;
+    }
+
     await sleep(50);
   } while (true);
 } 
