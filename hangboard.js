@@ -2,7 +2,7 @@ const HX711 = require('pi-hx711');
 const pigpio = require('pigpio');
 const Gpio = pigpio.Gpio;
 
-const globalData = {right: {value: 0, time: 0}, left: {value: 0, time: 0}};
+const globalData = {right: {value: 0, time: 0}, left: {value: 0, time: 0}, history: [], calibration: 100};
 
 function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
@@ -15,6 +15,7 @@ async function waitForState(dataPinRef, state, timeout) {
   let timeoutId = null;
   const delay = new Promise((resolve, reject) => {
     timeoutId = setTimeout(() => {
+      //console.log('timeout.');
       resolve(false);
     }, timeout);
   });
@@ -34,6 +35,15 @@ async function waitForState(dataPinRef, state, timeout) {
     dataPinRef.removeAllListeners('alert');
     return res;
   });
+}
+
+async function resetHX711(clockPin) {
+  // reboot the HX711 (having the clock HIGH for over 60 us will do this)
+  //console.log(`${currentTime()}: setting clock HIGH.`);
+  clockPin.digitalWrite(1);
+  console.log(`Setting clock pin HIGH.`);
+  await sleep(2); //sleeping for 2 milliseconds is really like 2000 us
+  clockPin.digitalWrite(0);
 }
 
 var globalStartTime = 0;
@@ -61,19 +71,8 @@ async function runLoadCell(sensorName, clockPinNumber, dataPinNumber) {
   const dataPin = new Gpio(dataPinNumber, {mode: Gpio.INPUT, pullUpDown: Gpio.PUD_DOWN, alert: true}); //important to set the pull down on this...
 
   await sleep(100);
-  
-  // reboot the HX711 (having the clock HIGH for over 60 us will do this)
-  //console.log(`${currentTime()}: setting clock HIGH.`);
-  clockPin.digitalWrite(1);
-  console.log(`Setting clock pin #${clockPinNumber} HIGH.`);
-  //await sleep(15000);
-  //process.exit(1);
 
-  // in 200ms, write the clock back to 0
-  setTimeout(() => {
-    //console.log(`${currentTime()}: setting clock LOW.`);
-    clockPin.digitalWrite(0);
-  }, 200);
+  resetHX711(clockPin); //lets reset every time.
 
   let wentHigh = await waitForState(dataPin, 1, 2000);
 
@@ -82,11 +81,12 @@ async function runLoadCell(sensorName, clockPinNumber, dataPinNumber) {
   }
 
   for (let sample=0; sample<100000000; sample++) {
-    await sleep(30);
+    let cycleStartTime = currentTime();
+    await sleep(20);
     if (dataPin.digitalRead() === 1) {
       //console.log(`${currentTime()}: data is HIGH.`);
       //await sleep(5);
-      let wentLow = await waitForState(dataPin, 0, 2000);
+      let wentLow = await waitForState(dataPin, 0, 700);
      
       if (wentLow) {
         // now lets generate a 2us pulse followed by a 2us pause
@@ -136,10 +136,10 @@ async function runLoadCell(sensorName, clockPinNumber, dataPinNumber) {
         if (process?.stdout?.clearLine) {
           process.stdout.clearLine();
           process.stdout.cursorTo(0);
-          process.stdout.write(`${sensorName} Sample #${(sample+1).toString().padStart(4,' ')}: ${currentTime().toFixed(3).padStart(6,' ')} = ${scaledTotal.toFixed(5).padStart(10,' ')})`);
+          //process.stdout.write(`${sensorName} Sample #${(sample+1).toString().padStart(4,' ')}: ${currentTime().toFixed(3).padStart(6,' ')} = ${scaledTotal.toFixed(5).padStart(10,' ')})`);
         }
         else {
-          console.log(`${sensorName} Sample #${(sample+1).toString().padStart(4,' ')}: ${currentTime().toFixed(3).padStart(6,' ')} = ${scaledTotal.toFixed(5).padStart(10,' ')})`);
+          //console.log(`${sensorName} Sample #${(sample+1).toString().padStart(4,' ')}: ${currentTime().toFixed(3).padStart(6,' ')} = ${scaledTotal.toFixed(5).padStart(10,' ')})`);
         }
         globalData[sensorName] = {value: scaledTotal, time: currentTime()};
 
@@ -151,7 +151,8 @@ async function runLoadCell(sensorName, clockPinNumber, dataPinNumber) {
       }
       else {
         console.log(`${sensorName} ${currentTime()}: Error, timed out waiting for data to go LOW.`);
-        process.exit(2);
+        resetHX711(clockPin);
+        //process.exit(2);
       }
     }
     else {
@@ -160,8 +161,12 @@ async function runLoadCell(sensorName, clockPinNumber, dataPinNumber) {
       //console.log(`${currentTime()}: went high: ${wentHigh}`);
       //process.exit(2);
       //await sleep(10);
-      let wentHigh = await waitForState(dataPin, 1, 10);
+      resetHX711(clockPin); //lets reset if its stuck
+      let wentHigh = await waitForState(dataPin, 1, 30);
     }
+    cycleEndTime = currentTime();
+
+    //console.log(`cycle took: ${cycleEndTime - cycleStartTime}`);
   }
 
   await sleep(1000);
@@ -177,6 +182,7 @@ runLoadCell("left", 16, 17);
 
 const express = require('express')
 const app = express();
+app.use(express.json()); //enable json bodies
 const port = 3000;
 
 app.get('/', (req, res) => {
@@ -184,6 +190,26 @@ app.get('/', (req, res) => {
 });
 
 app.get('/api', (req, res) => {
+  res.send(`${JSON.stringify(globalData)}`);
+});
+
+//when the app wants to save a sample
+app.post('/save', (req, res) => {
+  console.log(`Got a save command: type: ${req?.body?.type} weight: ${req?.body?.weight} time: ${req?.body?.time}`);
+  
+  if (req?.body?.type === 'cal' && req?.body?.weight > 5) {
+    
+    globalData.calibration *= (req?.body?.weight)/100;
+    console.log(`Calibration: ${globalData.calibration}`)
+  }
+  else {
+    globalData.history.push({type: req?.body?.type, weight: req?.body?.weight, time: req?.body?.time, date: Date.now()});
+  }
+
+  if (globalData.history.length > 1000) {
+    globalData.history.shift();
+  }
+
   res.send(`${JSON.stringify(globalData)}`);
 });
 
